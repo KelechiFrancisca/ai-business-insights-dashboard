@@ -1,24 +1,16 @@
-import React from "react";
-
 function InsightsPanel({ transactions }) {
-  const totalRevenue = transactions
-    .filter(t => t.type === "Income")
-    .reduce((sum, t) => sum + t.amount, 0);
-
-  const totalExpenses = transactions
-    .filter(t => t.type === "Expense")
-    .reduce((sum, t) => sum + t.amount, 0);
-
+  const totalRevenue = transactions.filter(t => t.type === "Income").reduce((sum, t) => sum + t.amount, 0);
+  const totalExpenses = transactions.filter(t => t.type === "Expense").reduce((sum, t) => sum + t.amount, 0);
   const netProfit = totalRevenue - totalExpenses;
 
   const expenseTrend = totalExpenses > 4000 ? "high" : "normal";
-  const forecast = netProfit < 2000 ? 
-    "Cash reserves may drop below safe levels in 45 days." : 
-    "Cashflow looks stable for the next 2 months.";
+  const forecast = netProfit < 2000
+    ? "Cash reserves may drop below safe levels in 45 days."
+    : "Cashflow looks stable for the next 2 months.";
 
-  const suggestion = expenseTrend === "high" ? 
-    "Consider renegotiating supplier contracts or cutting non‑essential costs." : 
-    "Maintain current expense levels to keep profit steady.";
+  const suggestion = expenseTrend === "high"
+    ? "Consider renegotiating supplier contracts or cutting non‑essential costs."
+    : "Maintain current expense levels to keep profit steady.";
 
   return (
     <div className="bg-yellow-50 p-6 rounded-lg shadow mb-8">
