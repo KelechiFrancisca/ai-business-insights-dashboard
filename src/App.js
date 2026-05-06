@@ -16,6 +16,7 @@ import Forecast from "./Forecast";
 import Alerts from "./Alerts";
 import Settings from "./Settings";
 import Profile from "./Profile";
+import ProtectedRoute from "./ProtectedRoute";
 
 ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend);
 
@@ -38,22 +39,59 @@ function App() {
             <Link to="/alerts" className="block text-gray-700 hover:text-blue-600">Alerts</Link>
             <Link to="/settings" className="block text-gray-700 hover:text-blue-600">Settings</Link>
             <Link to="/profile" className="block text-gray-700 hover:text-blue-600">Profile</Link>
+            <Link to="/login" className="block text-gray-700 hover:text-blue-600">Login</Link>
+            <Link to="/register" className="block text-gray-700 hover:text-blue-600">Register</Link>
           </nav>
         </aside>
 
         {/* Main Content */}
         <main className="flex-1 p-8">
           <Routes>
-            {/* Auth */}
+            {/* Public routes */}
             <Route path="/login" element={<Login />} />
             <Route path="/register" element={<Register />} />
 
-            {/* Core Pages */}
-            <Route path="/" element={<Dashboard />} />
-            <Route path="/forecast" element={<Forecast />} />
-            <Route path="/alerts" element={<Alerts />} />
-            <Route path="/settings" element={<Settings />} />
-            <Route path="/profile" element={<Profile />} />
+            {/* Protected routes */}
+            <Route
+              path="/"
+              element={
+                <ProtectedRoute>
+                  <Dashboard />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/forecast"
+              element={
+                <ProtectedRoute>
+                  <Forecast />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/alerts"
+              element={
+                <ProtectedRoute>
+                  <Alerts />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <ProtectedRoute>
+                  <Settings />
+                </ProtectedRoute>
+              }
+            />
+            <Route
+              path="/profile"
+              element={
+                <ProtectedRoute>
+                  <Profile />
+                </ProtectedRoute>
+              }
+            />
           </Routes>
         </main>
       </div>

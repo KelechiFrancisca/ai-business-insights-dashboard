@@ -1,44 +1,95 @@
+import { useState } from "react";
+import { useNavigate } from "react-router-dom";
+
 function Register() {
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const navigate = useNavigate();
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+
+    try {
+      const response = await fetch("http://localhost:5000/register", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, email, password }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok) {
+        // After successful registration, immediately log in
+        const loginRes = await fetch("http://localhost:5000/login", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ email, password }),
+        });
+
+        const loginData = await loginRes.json();
+
+        if (loginRes.ok) {
+          localStorage.setItem("token", loginData.token);
+          alert("Registration successful! You are now logged in.");
+          navigate("/dashboard");
+        } else {
+          alert("Registered, but login failed. Please try logging in.");
+          navigate("/login");
+        }
+      } else {
+        alert(data.error || "Registration failed");
+      }
+    } catch (error) {
+      console.error("Error registering:", error);
+      alert("Server error");
+    }
+  };
+
   return (
-    <div className="bg-gray-100 min-h-screen flex items-center justify-center">
-      <div className="bg-white p-8 rounded-lg shadow-md w-full max-w-md">
-        <h1 className="text-2xl font-bold mb-6 text-gray-800">Register</h1>
-        <form className="space-y-4">
-          <div>
-            <label className="block text-gray-700">Name</label>
-            <input
-              type="text"
-              className="w-full border rounded px-3 py-2 focus:outline-none focus:ring focus:border-blue-300"
-              placeholder="Enter your name"
-            />
-          </div>
-          <div>
-            <label className="block text-gray-700">Email</label>
-            <input
-              type="email"
-              className="w-full border rounded px-3 py-2 focus:outline-none focus:ring focus:border-blue-300"
-              placeholder="Enter your email"
-            />
-          </div>
-          <div>
-            <label className="block text-gray-700">Password</label>
-            <input
-              type="password"
-              className="w-full border rounded px-3 py-2 focus:outline-none focus:ring focus:border-blue-300"
-              placeholder="Create a password"
-            />
-          </div>
-          <button
-            type="submit"
-            className="w-full bg-green-500 text-white py-2 rounded hover:bg-green-600"
+    <div className="flex items-center justify-center min-h-screen bg-gray-100">
+      <form
+        onSubmit={handleSubmit}
+        className="bg-white p-6 rounded shadow-md w-96"
+      >
+        <h2 className="text-2xl font-bold mb-4">Register</h2>
+        <input
+          type="text"
+          placeholder="Name"
+          className="w-full mb-3 p-2 border rounded"
+          value={name}
+          onChange={(e) => setName(e.target.value)}
+        />
+        <input
+          type="email"
+          placeholder="Email"
+          className="w-full mb-3 p-2 border rounded"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
+        <input
+          type="password"
+          placeholder="Password"
+          className="w-full mb-3 p-2 border rounded"
+          value={password}
+          onChange={(e) => setPassword(e.target.value)}
+        />
+        <button
+          type="submit"
+          className="w-full bg-green-500 text-white py-2 rounded hover:bg-green-600"
+        >
+          Register
+        </button>
+        <p className="mt-3 text-sm">
+          Already have an account?{" "}
+          <span
+            className="text-blue-600 cursor-pointer"
+            onClick={() => navigate("/login")}
           >
-            Register
-          </button>
-        </form>
-        <p className="text-gray-600 mt-4 text-sm">
-          Already have an account? <a href="/login" className="text-blue-500">Login</a>
+            Login
+          </span>
         </p>
-      </div>
+      </form>
     </div>
   );
 }
