@@ -29,15 +29,6 @@ def get_db_connection():
     # ✅ Use DATABASE_URL from Render environment instead of localhost
     return psycopg2.connect(os.environ["DATABASE_URL"])
 
-def get_db_connection():
-    return psycopg2.connect(
-        dbname="founding_mvp",
-        user="postgres",
-        password="Francisca2026!",  # replace with your password
-        host="localhost",
-        port="5432"
-    )
-
 # ---------------- AUTH ROUTES ----------------
 @app.route('/register', methods=['POST'])
 def register():
