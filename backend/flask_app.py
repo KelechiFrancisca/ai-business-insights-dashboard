@@ -26,6 +26,10 @@ jwt = JWTManager(app)
 
 # --- Database connection helper ---
 def get_db_connection():
+    # ✅ Use DATABASE_URL from Render environment instead of localhost
+    return psycopg2.connect(os.environ["DATABASE_URL"])
+
+def get_db_connection():
     return psycopg2.connect(
         dbname="founding_mvp",
         user="postgres",
