@@ -32,4 +32,4 @@ tzdata==2025.2
 Werkzeug==3.1.6
 wheel==0.45.1
 flask-cors
-
+flask-jwt-extended
