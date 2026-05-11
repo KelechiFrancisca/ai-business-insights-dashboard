@@ -26,9 +26,19 @@ jwt = JWTManager(app)
 
 # --- Database connection helper ---
 def get_db_connection():
-    # ✅ Use DATABASE_URL from Render environment instead of localhost
-    return psycopg2.connect(os.environ["DATABASE_URL"])
-
+    db_url = os.environ.get("DATABASE_URL")
+    if db_url:
+        # Use Render’s hosted database
+        return psycopg2.connect(db_url)
+    else:
+        # Fallback for local development
+        return psycopg2.connect(
+            dbname="founding_mvp",
+            user="postgres",
+            password="Francisca2026!",
+            host="localhost",
+            port="5432"
+        )
 # ---------------- AUTH ROUTES ----------------
 @app.route('/register', methods=['POST'])
 def register():
@@ -209,24 +219,38 @@ def forecast():
 def get_alerts():
     user_id = get_jwt_identity()
     conn = get_db_connection()
-    cursor = conn.cursor()
-    cursor.execute("SELECT type, amount FROM entries WHERE user_id=%s", (user_id,))
-    rows = cursor.fetchall()
-    cursor.close()
+    cur = conn.cursor()
+
+    cur.execute("SELECT type, amount FROM entries WHERE user_id = %s", (user_id,))
+    entries = cur.fetchall()
     conn.close()
 
-    alerts = []
-    total_income = sum(r[1] for r in rows if r[0] == "income")
-    total_expenses = sum(r[1] for r in rows if r[0] == "expense")
-    net = total_income - total_expenses
+    income = sum(float(e[1]) for e in entries if e[0] == 'income')
+    expenses = sum(float(e[1]) for e in entries if e[0] == 'expense')
+    net_cashflow = income - expenses
 
-    if net < 1000:
-        alerts.append("⚠️ Net cashflow is below $1,000")
-    if total_expenses > total_income:
-        alerts.append("⚠️ Expenses exceed income")
+    alerts = []
+    if net_cashflow < 1000:
+        alerts.append("⚠ Net cashflow is below $1,000")
+    if expenses > income:
+        alerts.append("⚠ Expenses exceed income")
+
+    # Add positive signals if no warnings
+    if not alerts:
+        if net_cashflow >= 5000:
+            alerts.append("✅ Strong financial health")
+        elif net_cashflow >= 1000:
+            alerts.append("ℹ Stable finances")
+        else:
+            alerts.append("✅ Healthy finance")
 
     return jsonify(alerts)
+
 
 # ---------------- MAIN ----------------
 if __name__ == "__main__":
     app.run(debug=True)
+
+    print(app.url_map)
+
+print("DATABASE_URL:", os.environ.get("DATABASE_URL"))
