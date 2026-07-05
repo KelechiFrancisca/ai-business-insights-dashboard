@@ -272,10 +272,10 @@ def upload_file():
         "INSERT INTO uploads (user_id, filename, filepath) VALUES (%s, %s, %s)",
         (user_id, file.filename, filepath),
     )
-   conn.commit()
+    conn.commit()
 
-   cur.close()
-   conn.close()
+    cur.close()
+    conn.close()
 
     return jsonify({"message": "File uploaded successfully", "filename": file.filename}), 201
 
