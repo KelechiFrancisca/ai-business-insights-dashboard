@@ -213,7 +213,7 @@ def update_profile():
     conn = None
     cursor = None
 
-    try:
+        try:
         conn = get_db_connection()
         cursor = conn.cursor()
 
@@ -264,10 +264,11 @@ def upload_file():
         (user_id, file.filename, filepath),
     )
     conn.commit()
-if cur:
-    cur.close()
-if conn:
-    conn.close()
+    if cur:
+        cur.close()
+
+    if conn:
+        conn.close()
 
     return jsonify({"message": "File uploaded successfully", "filename": file.filename}), 201
 
