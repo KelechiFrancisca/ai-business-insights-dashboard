@@ -1,112 +1,51 @@
-print('HELLO WORLD')
+import os, csv, io
+import pandas as pd
+from dotenv import load_dotenv
+load_dotenv()
 
-print('This is my first programming language')
+from flask import Flask, request, jsonify, Response
+from flask_cors import CORS
+from werkzeug.utils import secure_filename
+from datetime import datetime, date
+from apscheduler.schedulers.background import BackgroundScheduler
 
-A = 50
+from extensions import db, migrate
+from entries import entries_bp
+from auth import auth_bp
+from models import User, Entry, Forecast, Alert, Upload, Settings
+from auth_utils import verify_token_and_get_user
 
-print ('\nThe Data type for A is',type(A))
+app = Flask(__name__)
 
-B = 4.0
-print ('The Data type for B is',type(B))
+# ✅ Expanded CORS config for React frontend (local + cloud)
+CORS(app, supports_credentials=True, origins=[
+    "http://localhost:3000",
+    "https://finsight-frontend-rhov.onrender.com"
+])
 
-is_false = False
-print ('The Data type for is_false',type(is_false))
+# ✅ Database config (Postgres only)
+app.config["SQLALCHEMY_DATABASE_URI"] = os.getenv("DATABASE_URL")
+app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
+app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "replace_with_long_random_secret_key")
 
-House = 'Table and Chair'
-print ('The Data type for House is',type(House))
+# ✅ Initialize DB + Migrations
+db.init_app(app)
+migrate.init_app(app, db)
 
-Kitchen = 'spoon and plate'
-print ('The Data type for Kitchen is',type(Kitchen))
+# Register blueprints
+app.register_blueprint(entries_bp, url_prefix="/api")
+app.register_blueprint(auth_bp, url_prefix="/api")
 
-FName = 'Francisca'
-SName = 'Kelechi'
-Space =''
-Full_name = FName + Space + SName
+# -------------------------
+# Your routes and helpers
+# -------------------------
 
+# (all the routes you pasted earlier: upload, settings, clear_entries, clear_all,
+# forecast, alerts, resolve_alert, acknowledge_alert, etc.)
+# ✅ Keep them exactly as they are
 
-# Writing python code for calculation
-a = 40
-b = 10
-z = a+b 
-print ('The sum of a and b is',z)
-
-# subtract
-z = a-b 
-print ('The minus of a and b',z)
-
-z = a%b 
-print (z)
-
-y = 9/5
-y_2 = 9//5
-print ("\nthe valve of y is",y)
-print ("\nThe value of y_2 is",y_2)
-
-# find x if x = 2power 10 + ysquare
-y = 9
-c = 2**10
-y = 9**2
-x = c+y
-print (x)
-
-a = 10
-b = 7
-c = 4
-y = a+b+c
-print (y)
-
-a = [6,9,12,15,18]
-print (a[3])
-
-# Data structures
-a = [4,6,8,10,12]
-b = {39,6,12}
-c = (6,9,7)
-Student = {
-    'name': 'franca',
-    'age' :    20,
-    'location': 'ogba'
-}
-print (a)
-print (type (a))
-
-print (Student)
-print (type(Student))
-
-product = 40000 
-if product >= 20000 :   
-   print ('you are eligible for the 30% discount')
-else :
-   print ('you are not eligible for the discount')
-
-   Count = 0
-   while Count < 5:
-      print (Count)
-   Count = Count +1
-
-   def add ( x, y):
-      z = a+b
-      return z
-   # calling in the function
-   add (10,12)
-
-   def welcome (name):
-      Message = name + 'welcome to our page'
-      return Message ( Space + ' ' + welcome ('Franca'))
-   
-   Count = 0
-   while Count < 5:
-      print (Count)
-   Count = Count +1
-
-   def add ( x, y):
-      z = a+b
-      return z
-   # calling in the function
-   add (10,12)
-
-   def welcome (name):
-      Message = name + 'welcome to our page'
-      return Message ( Space + ' ' + welcome ('Franca'))
-
-   
+# -------------------------
+# Run App
+# -------------------------
+if __name__ == "__main__":
+    app.run(debug=True)

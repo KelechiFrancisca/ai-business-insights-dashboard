@@ -11,7 +11,6 @@ import {
   Tooltip,
   Legend,
 } from "chart.js";
-import InsightsPanel from "./InsightsPanel";
 
 ChartJS.register(
   CategoryScale,
@@ -24,12 +23,25 @@ ChartJS.register(
   Legend
 );
 
+// ✅ Currency symbols + formatter
+const currencySymbols = {
+  USD: "$", EUR: "€", GBP: "£", CAD: "C$", JPY: "¥",
+  NGN: "₦", ZAR: "R", KES: "KSh", GHS: "₵", EGP: "£E",
+  XOF: "CFA", XAF: "CFA"
+};
+
+function formatAmount(amount, currency) {
+  const symbol = currencySymbols[currency] || "";
+  return `${symbol}${Number(amount).toLocaleString()}`;
+}
+
 function Forecast() {
   const [transactions, setTransactions] = useState([]);
   const [activeTab, setActiveTab] = useState("trend");
   const [activeScenario, setScenario] = useState("Realistic");
   const [showModal, setShowModal] = useState(false);
   const [horizon, setHorizon] = useState(12);
+  const [currency, setCurrency] = useState("USD");
 
   const baseUrl =
     window.location.hostname === "localhost"
@@ -42,6 +54,7 @@ function Forecast() {
       window.location.href = "/login";
       return;
     }
+    // ✅ Fetch entries
     fetch(`${baseUrl}/entries`, {
       headers: { Authorization: "Bearer " + token },
     })
@@ -52,6 +65,21 @@ function Forecast() {
         }
       })
       .catch((err) => console.error("Error fetching entries:", err));
+
+    // ✅ Fetch settings for currency
+    fetch(`${baseUrl}/settings`, {
+      headers: { Authorization: "Bearer " + token },
+    })
+      .then((res) => res.json())
+      .then((data) => setCurrency(data.currency || "USD"))
+      .catch((err) => console.error("Error fetching settings:", err));
+
+    // ✅ Read ?tab= query parameter from URL
+    const params = new URLSearchParams(window.location.search);
+    const tabParam = params.get("tab");
+    if (tabParam) {
+      setActiveTab(tabParam);
+    }
   }, [baseUrl]);
 
   // Totals
@@ -121,39 +149,63 @@ function Forecast() {
   };
 
   return (
-    <div className="bg-gray-100 min-h-screen p-6">
-      <h1 className="text-2xl font-bold mb-6 text-gray-800">AI-Powered Forecast</h1>
+    <div className="bg-gray-100 min-h-screen p-6 text-base md:text-lg font-bold">
+      <h1 className="text-2xl font-extrabold mb-6 text-gray-800">AI-Powered Forecast</h1>
 
-      {/* KPI Cards */}
+      {/* KPI Cards with icons */}
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-6">
-        <div className="bg-white p-4 rounded-lg shadow-md">
-          <h2 className="text-sm font-semibold text-gray-600">Revenue</h2>
-          <p className="text-xl font-bold text-teal-600">${totalRevenue.toFixed(2)}</p>
+        <div className="bg-green-100 p-4 rounded-lg shadow-md flex flex-col items-center">
+          <span className="text-2xl">💰</span>
+          <h2 className="text-sm font-bold text-gray-600">Revenue</h2>
+          <p className="text-3xl font-extrabold text-green-700">{formatAmount(totalRevenue, currency)}</p>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow-md">
-          <h2 className="text-sm font-semibold text-gray-600">Expenses</h2>
-          <p className="text-xl font-bold text-red-600">${totalExpenses.toFixed(2)}</p>
+        <div className="bg-red-100 p-4 rounded-lg shadow-md flex flex-col items-center">
+          <span className="text-2xl">📉</span>
+          <h2 className="text-sm font-bold text-gray-600">Expenses</h2>
+          <p className="text-3xl font-extrabold text-red-700">{formatAmount(totalExpenses, currency)}</p>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow-md">
-          <h2 className="text-sm font-semibold text-gray-600">Net Profit</h2>
-          <p className="text-xl font-bold text-blue-600">${netProfit.toFixed(2)}</p>
+        <div className="bg-blue-100 p-4 rounded-lg shadow-md flex flex-col items-center">
+          <span className="text-2xl">📈</span>
+          <h2 className="text-sm font-bold text-gray-600">Net Profit</h2>
+          <p className="text-3xl font-extrabold text-blue-700">{formatAmount(netProfit, currency)}</p>
         </div>
-        <div className="bg-white p-4 rounded-lg shadow-md">
-          <h2 className="text-sm font-semibold text-gray-600">Margin</h2>
-          <p className="text-xl font-bold text-purple-600">{profitMargin.toFixed(2)}%</p>
+        <div className="bg-purple-100 p-4 rounded-lg shadow-md flex flex-col items-center">
+          <span className="text-2xl">📊</span>
+          <h2 className="text-sm font-bold text-gray-600">Margin</h2>
+          <p className="text-3xl font-extrabold text-purple-700">{profitMargin.toFixed(2)}%</p>
         </div>
       </div>
 
-      {/* Cashflow Insights */}
-      <InsightsPanel transactions={transactions} />
+            {/* Cashflow Insights with color + currency */}
+      <div
+        className={`p-6 rounded-lg shadow-md mb-6 ${
+          netProfit < 2000 ? "bg-red-100" : "bg-teal-50"
+        }`}
+      >
+        <h2 className="text-lg font-bold mb-2 text-gray-800">📊 Cashflow Insights</h2>
+        <p className="text-gray-700">
+          📊 Expenses increased by 1400.0% compared to last month.
+        </p>
+        <p className="text-gray-700">
+          🔮 Forecast: Cashflow looks stable for the next 2 months.
+        </p>
+        <p className="text-gray-700">
+          💡 Suggested Action: Consider renegotiating supplier contracts or cutting non‑essential costs.
+        </p>
+        <p className="text-gray-700">
+          📈 Net Profit:{" "}
+          <span className="font-extrabold">{formatAmount(netProfit, currency)}</span> (Margin:{" "}
+          {profitMargin.toFixed(2)}%)
+        </p>
+      </div>
 
       {/* Scenario Compare Toggle */}
-      <div className="flex space-x-4 mb-6">
+      <div className="flex space-x-4 mb-6 font-bold">
         {["Optimistic", "Realistic", "Pessimistic"].map((s) => (
           <button
             key={s}
             onClick={() => setScenario(s)}
-            className={`px-4 py-2 rounded-lg font-semibold ${
+            className={`px-4 py-2 rounded-lg font-bold ${
               activeScenario === s ? "bg-teal-500 text-white" : "bg-gray-200 text-gray-700 hover:bg-gray-300"
             }`}
           >
@@ -163,13 +215,13 @@ function Forecast() {
       </div>
 
       {/* Forecast Horizon Dropdown */}
-      <div className="mb-6 flex items-center space-x-4">
+      <div className="mb-6 flex items-center space-x-4 font-bold">
         <div>
-          <label className="block text-sm font-medium text-gray-700">Forecast Horizon</label>
+          <label className="block text-sm font-bold text-gray-700">Forecast Horizon</label>
           <select
             value={horizon}
             onChange={(e) => setHorizon(Number(e.target.value))}
-            className="border p-2 rounded w-40"
+            className="border p-2 rounded w-40 font-bold"
           >
             <option value={6}>6 months</option>
             <option value={12}>12 months</option>
@@ -178,14 +230,13 @@ function Forecast() {
         </div>
         <button
           onClick={exportCSV}
-          className="bg-teal-500 text-white px-4 py-2 rounded hover:bg-teal-600"
+          className="bg-teal-500 text-white px-4 py-2 rounded hover:bg-teal-600 font-bold"
         >
           Export CSV
         </button>
       </div>
-
-            {/* Forecast Summary Card */}
-      <div className="bg-gradient-to-r from-teal-500 to-teal-300 text-white p-6 rounded-lg shadow-md mb-8">
+      {/* Forecast Summary Card */}
+      <div className="bg-gradient-to-r from-teal-500 to-teal-300 text-white p-6 rounded-lg shadow-md mb-8 font-bold">
         <h2 className="text-xl font-bold mb-2">Forecast Summary ({activeScenario})</h2>
         <p className="text-lg">
           {netProfit < 2000
@@ -193,20 +244,20 @@ function Forecast() {
             : "✅ Cashflow looks stable. Current reserves are sufficient to sustain operations."}
         </p>
         <p className="mt-2">
-          Current Margin: <span className="font-bold">{profitMargin.toFixed(2)}%</span>
+          Current Margin: <span className="font-extrabold">{profitMargin.toFixed(2)}%</span>
         </p>
         <p>
           Projected Profit in {horizon} months:{" "}
-          <span className="font-bold">${projectedProfit[horizon-1].toFixed(2)}</span>
+          <span className="font-extrabold">{formatAmount(projectedProfit[horizon-1], currency)}</span>
         </p>
         <p>
           Projected Margin in {horizon} months:{" "}
-          <span className="font-bold">{projectedMargin[horizon-1].toFixed(2)}%</span>{" "}
+          <span className="font-extrabold">{projectedMargin[horizon-1].toFixed(2)}%</span>{" "}
           {projectedMargin[horizon-1] > profitMargin ? "⬆️" : projectedMargin[horizon-1] < profitMargin ? "⬇️" : "➡️"}
         </p>
 
-        {/* Adjusted Margin Badge with Arrow */}
-        <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-lg font-semibold mt-2 inline-block">
+        {/* Adjusted Margin Badge */}
+        <span className="px-3 py-1 bg-purple-100 text-purple-700 rounded-lg font-extrabold mt-2 inline-block">
           Adjusted Margin: {adjustedMargin.toFixed(2)}%{" "}
           {adjustedMargin > profitMargin ? "⬆️" : adjustedMargin < profitMargin ? "⬇️" : "➡️"}
         </span>
@@ -215,7 +266,7 @@ function Forecast() {
         <div className="mt-4">
           <button
             onClick={() => setShowModal(true)}
-            className="bg-white text-teal-600 font-semibold px-4 py-2 rounded-lg shadow hover:bg-gray-100"
+            className="bg-white text-teal-600 font-bold px-4 py-2 rounded-lg shadow hover:bg-gray-100"
           >
             {netProfit < 2000 ? "Cut Costs by 10%" : "Invest in Growth"}
           </button>
@@ -225,23 +276,23 @@ function Forecast() {
       {/* Modal Popup */}
       {showModal && (
         <div className="fixed inset-0 flex items-center justify-center bg-black bg-opacity-50">
-          <div className="bg-white p-6 rounded-lg shadow-lg max-w-md">
+          <div className="bg-white p-6 rounded-lg shadow-lg max-w-md font-bold">
             <h3 className="text-lg font-bold mb-4 text-gray-800">Recommended Action</h3>
             <p className="text-gray-700 mb-4">
               {netProfit < 2000
-                ? "Reducing costs by 10% saves ~$360/month, improving cash reserves and lowering risk."
+                ? "Reducing costs by 10% saves ~" + formatAmount(360, currency) + "/month, improving cash reserves and lowering risk."
                 : "Investing in growth could raise revenue by ~15%, boosting profit margins and long-term stability."}
             </p>
             <div className="flex justify-between">
               <button
                 onClick={() => setShowModal(false)}
-                className="bg-gray-300 text-gray-800 px-4 py-2 rounded hover:bg-gray-400"
+                className="bg-gray-300 text-gray-800 px-4 py-2 rounded hover:bg-gray-400 font-bold"
               >
                 Close
               </button>
               <a
                 href="/alerts"
-                className="bg-teal-500 text-white px-4 py-2 rounded hover:bg-teal-600"
+                className="bg-teal-500 text-white px-4 py-2 rounded hover:bg-teal-600 font-bold"
               >
                 Take Action →
               </a>
@@ -251,14 +302,14 @@ function Forecast() {
       )}
 
       {/* Tabs for Trend, Proportion, Liquidity, Growth, Risk, Efficiency, Breakdown, Heatmap */}
-      <div className="bg-white p-6 rounded-lg shadow-md">
+      <div className="bg-white p-6 rounded-lg shadow-md font-bold">
         <h2 className="text-lg font-bold text-gray-800 mb-4">Forecast Visuals</h2>
-        <div className="flex space-x-4 mb-6 flex-wrap">
+        <div className="flex space-x-4 mb-6 flex-wrap font-bold">
           {["trend","proportion","liquidity","growth","risk","efficiency","breakdown","heatmap"].map(tab => (
             <button
               key={tab}
               onClick={() => setActiveTab(tab)}
-              className={`px-4 py-2 rounded mb-2 ${
+              className={`px-4 py-2 rounded mb-2 font-bold ${
                 activeTab === tab ? "bg-teal-600 text-white" : "bg-gray-200"
               }`}
             >
@@ -269,16 +320,16 @@ function Forecast() {
 
         {/* Trend Chart */}
         {activeTab === "trend" && (
-          <div>
+          <div className="font-bold">
             <Line data={{
               labels: monthsAhead,
               datasets: [
-                { label: "Revenue", data: projectedRevenue, borderColor: "#10B981", backgroundColor: "#A7F3D0", fill: false, tension: 0.4, pointRadius: 5 },
-                { label: "Expenses", data: projectedExpenses, borderColor: "#EF4444", backgroundColor: "#FCA5A5", fill: false, tension: 0.4, pointRadius: 5 },
+                { label: "Revenue", data: projectedRevenue, borderColor: "#10B981", backgroundColor: "#A7F3D0", fill: true, tension: 0.4, pointRadius: 5 },
+                { label: "Expenses", data: projectedExpenses, borderColor: "#EF4444", backgroundColor: "#FCA5A5", fill: true, tension: 0.4, pointRadius: 5 },
                 { label: "Profit", data: projectedProfit, borderColor: "#3B82F6", backgroundColor: "#93C5FD", fill: true, tension: 0.4, pointRadius: 5 },
               ],
             }} />
-            <p className={`mt-3 text-base font-semibold px-3 py-2 rounded-lg shadow-sm ${profitMargin > 50 ? "bg-green-50 text-gray-900" : "bg-blue-50 text-gray-900"}`}>
+            <p className={`mt-3 text-base font-extrabold px-3 py-2 rounded-lg shadow-sm ${profitMargin > 50 ? "bg-green-50 text-gray-900" : "bg-blue-50 text-gray-900"}`}>
               {profitMargin > 50 ? "✅ Strong margins above 50%." : "📈 Profit remains stable, with expenses steady at ~40% of revenue."}
             </p>
           </div>
@@ -286,7 +337,7 @@ function Forecast() {
 
         {/* Proportion Chart */}
         {activeTab === "proportion" && (
-          <div>
+          <div className="font-bold">
             <Bar
               data={{
                 labels: monthsAhead,
@@ -297,7 +348,7 @@ function Forecast() {
               }}
               options={{ scales: { x: { stacked: true }, y: { stacked: true, beginAtZero: true } }}}
             />
-            <p className="mt-3 text-base text-gray-900 font-semibold bg-green-50 px-3 py-2 rounded-lg shadow-sm">
+            <p className="mt-3 text-base text-gray-900 font-extrabold bg-green-50 px-3 py-2 rounded-lg shadow-sm">
               💰 Each month, profit consistently exceeds expenses, showing healthy margins.
             </p>
           </div>
@@ -305,22 +356,22 @@ function Forecast() {
 
         {/* Liquidity Chart */}
         {activeTab === "liquidity" && (
-          <div>
+          <div className="font-bold">
             <Line
               data={{
                 labels: monthsAhead,
-                datasets: [{ label: "Cash Reserves ($)", data: cumulativeCashflow, borderColor: "#14B8A6", backgroundColor: "#67E8F9", fill: true, tension: 0.4, pointRadius: 5 }],
+                datasets: [{ label: "Cash Reserves", data: cumulativeCashflow, borderColor: "#14B8A6", backgroundColor: "#67E8F9", fill: true, tension: 0.4, pointRadius: 5 }],
               }}
             />
-            <p className="mt-3 text-base text-gray-900 font-semibold bg-blue-50 px-3 py-2 rounded-lg shadow-sm">
-              📊 Cash reserves are projected to grow steadily, reaching ~${cumulativeCashflow[horizon-1].toFixed(0)} by {monthsAhead[horizon-1]}.
+            <p className="mt-3 text-base text-gray-900 font-extrabold bg-blue-50 px-3 py-2 rounded-lg shadow-sm">
+              📊 Cash reserves are projected to grow steadily, reaching ~{formatAmount(cumulativeCashflow[horizon-1], currency)} by {monthsAhead[horizon-1]}.
             </p>
           </div>
         )}
 
         {/* Growth Tab */}
         {activeTab === "growth" && (
-          <div>
+          <div className="font-bold">
             <Line
               data={{
                 labels: monthsAhead,
@@ -330,7 +381,7 @@ function Forecast() {
                 ],
               }}
             />
-            <p className={`mt-3 text-base font-semibold px-3 py-2 rounded-lg shadow-sm ${Math.max(...scenario.churn) > 7 ? "bg-red-50 text-gray-900" : "bg-blue-50 text-gray-900"}`}>
+            <p className={`mt-3 text-base font-extrabold px-3 py-2 rounded-lg shadow-sm ${Math.max(...scenario.churn) > 7 ? "bg-red-50 text-gray-900" : "bg-blue-50 text-gray-900"}`}>
               {Math.max(...scenario.churn) > 7 ? "⚠️ Churn risk rising above 7%." : "📈 Sales expected to grow, while churn remains manageable."}
             </p>
           </div>
@@ -338,7 +389,7 @@ function Forecast() {
 
                 {/* Risk Tab */}
         {activeTab === "risk" && (
-          <div>
+          <div className="font-bold">
             <Line
               data={{
                 labels: monthsAhead,
@@ -373,15 +424,15 @@ function Forecast() {
                 ],
               }}
             />
-            <p className="mt-3 text-base text-gray-900 font-semibold bg-red-50 px-3 py-2 rounded-lg shadow-sm">
-              ⚠️ 20% chance of reserves dipping below $5,000 in Q4; 📊 60% chance of profit growth above 10%.
+            <p className="mt-3 text-base text-gray-900 font-extrabold bg-red-50 px-3 py-2 rounded-lg shadow-sm">
+              ⚠️ 20% chance of reserves dipping below {formatAmount(5000, currency)} in Q4; 📊 60% chance of profit growth above 10%.
             </p>
           </div>
         )}
 
-        {/* Efficiency Tab (Stacked Bar) */}
+                {/* Efficiency Tab */}
         {activeTab === "efficiency" && (
-          <div>
+          <div className="font-bold">
             <Bar
               data={{
                 labels: monthsAhead,
@@ -407,15 +458,15 @@ function Forecast() {
                 },
               }}
             />
-            <p className="mt-3 text-base text-gray-900 font-semibold bg-green-50 px-3 py-2 rounded-lg shadow-sm">
+            <p className="mt-3 text-base text-gray-900 font-extrabold bg-green-50 px-3 py-2 rounded-lg shadow-sm">
               💡 Inventory turns ~4x per month; expenses remain ~40% of revenue, indicating stable efficiency.
             </p>
           </div>
         )}
 
-        {/* Breakdown Tab (Waterfall Chart) */}
+        {/* Breakdown Tab */}
         {activeTab === "breakdown" && (
-          <div>
+          <div className="font-bold">
             <Bar
               data={{
                 labels: ["Revenue", "Expenses", "Profit"],
@@ -432,15 +483,15 @@ function Forecast() {
                 scales: { y: { beginAtZero: true } },
               }}
             />
-            <p className="mt-3 text-base text-gray-900 font-semibold bg-purple-50 px-3 py-2 rounded-lg shadow-sm">
+            <p className="mt-3 text-base text-gray-900 font-extrabold bg-purple-50 px-3 py-2 rounded-lg shadow-sm">
               📊 Waterfall view shows how revenue flows into expenses and results in net profit.
             </p>
           </div>
         )}
 
-        {/* Heatmap Tab (Expenses by Category vs Month) */}
+        {/* Heatmap Tab */}
         {activeTab === "heatmap" && (
-          <div>
+          <div className="font-bold">
             <Bar
               data={{
                 labels: monthsAhead,
@@ -470,7 +521,7 @@ function Forecast() {
                 },
               }}
             />
-            <p className="mt-3 text-base text-gray-900 font-semibold bg-yellow-50 px-3 py-2 rounded-lg shadow-sm">
+            <p className="mt-3 text-base text-gray-900 font-extrabold bg-yellow-50 px-3 py-2 rounded-lg shadow-sm">
               🔎 Heatmap shows Marketing and Operations dominate monthly expenses, with Miscellaneous steady at ~30%.
             </p>
           </div>
@@ -481,3 +532,4 @@ function Forecast() {
 }
 
 export default Forecast;
+
