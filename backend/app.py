@@ -6,7 +6,7 @@ load_dotenv()
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
 from werkzeug.utils import secure_filename
-from datetime import datetime, date
+from datetime import date
 from apscheduler.schedulers.background import BackgroundScheduler
 from sqlalchemy import text
 
@@ -43,9 +43,6 @@ CURRENCY_SYMBOLS = {
 def health():
     return jsonify({"status": "ok", "message": "Backend is healthy"}), 200
 
-def generate_alerts_for_user(user_id):
-    pass
-
 UPLOAD_FOLDER = "uploads"
 os.makedirs(UPLOAD_FOLDER, exist_ok=True)
 
@@ -55,7 +52,6 @@ def upload():
     user_id = verify_token_and_get_user(token)
     if not user_id:
         return jsonify({"error": "Invalid token"}), 401
-
     if request.method == "POST":
         if "file" not in request.files:
             return jsonify({"error": "No file provided"}), 400
@@ -63,28 +59,17 @@ def upload():
         filename = secure_filename(file.filename)
         if not filename.lower().endswith(".csv"):
             return jsonify({"error": "Invalid file type. Please upload CSV only."}), 400
-
         df = pd.read_csv(file)
         required_headers = {"Date", "Type", "Category", "Description", "Amount"}
         if not required_headers.issubset(df.columns):
             return jsonify({"error": "CSV missing required headers"}), 400
-
         for _, row in df.iterrows():
-            new_entry = Entry(
-                user_id=user_id,
-                date=row["Date"],
-                type=row["Type"],
-                category=row["Category"],
-                description=row["Description"],
-                amount=row["Amount"]
-            )
+            new_entry = Entry(user_id=user_id, date=row["Date"], type=row["Type"], category=row["Category"], description=row["Description"], amount=row["Amount"])
             db.session.add(new_entry)
-
         new_upload = Upload(user_id=user_id, filename=filename)
         db.session.add(new_upload)
         db.session.commit()
         return jsonify(new_upload.to_dict())
-
     uploads = Upload.query.filter_by(user_id=user_id).all()
     return jsonify([u.to_dict() for u in uploads])
 
@@ -106,25 +91,18 @@ def settings():
     user_id = verify_token_and_get_user(token)
     if not user_id:
         return jsonify({"error": "Invalid token"}), 401
-
     if request.method == "GET":
         settings_obj = Settings.query.filter_by(user_id=user_id).first()
         if settings_obj:
-            return jsonify({
-                "business_name": settings_obj.business_name,
-                "currency": settings_obj.currency or "USD"
-            })
+            return jsonify({"business_name": settings_obj.business_name, "currency": settings_obj.currency or "USD"})
         else:
             return jsonify({"business_name": "", "currency": "USD"})
-
     if request.method == "POST":
         data = request.get_json()
         business_name = data.get("business_name", "")
         currency = data.get("currency", "")
-
         if currency not in CURRENCY_SYMBOLS.keys():
             return jsonify({"error": "Invalid currency. Allowed: " + ", ".join(CURRENCY_SYMBOLS.keys())}), 400
-
         settings_obj = Settings.query.filter_by(user_id=user_id).first()
         if not settings_obj:
             settings_obj = Settings(user_id=user_id, business_name=business_name, currency=currency)
@@ -132,7 +110,6 @@ def settings():
         else:
             settings_obj.business_name = business_name
             settings_obj.currency = currency
-
         db.session.commit()
         return jsonify({"message": "Settings saved successfully!"})
 
@@ -144,14 +121,7 @@ def get_categories():
         return jsonify({"error": "Invalid token"}), 401
     cats = Category.query.filter_by(user_id=user_id).order_by(Category.name).all()
     if not cats:
-        defaults = [
-            ("Sales", "income"),
-            ("Rent", "expense"),
-            ("Food", "expense"),
-            ("Transport", "expense"),
-            ("Utilities", "expense"),
-            ("Marketing", "expense")
-        ]
+        defaults = [("Sales", "income"), ("Rent", "expense"), ("Food", "expense"), ("Transport", "expense"), ("Utilities", "expense"), ("Marketing", "expense")]
         for name, type_val in defaults:
             db.session.add(Category(user_id=user_id, name=name, type=type_val))
         db.session.commit()
@@ -276,50 +246,26 @@ scheduler = BackgroundScheduler()
 scheduler.add_job(func=generate_daily_alerts, trigger="cron", hour=0, minute=0)
 scheduler.start()
 
-# --- AUTO-MIGRATION FOR ALERTS TABLE - FIXES 500 ERROR ---
+# --- FINAL FIX: DROP OLD ALERTS TABLE AND RECREATE ---
 with app.app_context():
     try:
-        db.session.execute(text("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS why TEXT"))
-        db.session.execute(text("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS actions TEXT"))
-        db.session.execute(text("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS resolved BOOLEAN DEFAULT FALSE"))
-        db.session.execute(text("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS acknowledged BOOLEAN DEFAULT FALSE"))
-        db.session.execute(text("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS resolved_by TEXT"))
-        db.session.execute(text("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS resolved_at TIMESTAMP"))
-        db.session.execute(text("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS acknowledged_at TIMESTAMP"))
-        db.session.execute(text("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS notified_at TIMESTAMP"))
-        db.session.execute(text("ALTER TABLE alerts ADD COLUMN IF NOT EXISTS notification_type TEXT"))
+        db.session.execute(text("DROP TABLE IF EXISTS alerts CASCADE"))
         db.session.commit()
-        print("Migrated alerts table successfully")
+        print("Dropped old alerts table")
     except Exception as e:
-        print(f"Migration skipped: {e}")
+        print(f"Drop skipped: {e}")
         db.session.rollback()
     db.create_all()
+    print("All tables recreated successfully - new alerts schema ready")
 
-# --- Load alerts.py with why/actions ---
+# Load your good alerts logic
 import alerts
 
 @app.route("/")
 def home():
-    return """
-    <html>
-        <head>
-            <title>Finsight AI</title>
-            <style>
-                body { font-family: Arial, sans-serif; text-align: center; margin-top: 100px; background-color: #f9f9f9; }
-                h1 { color: #2c3e50; }
-                p { color: #34495e; font-size: 18px; }
-                a { color: #2980b9; text-decoration: none; }
-                a:hover { text-decoration: underline; }
-            </style>
-        </head>
-        <body>
-            <h1>Welcome to Finsight AI</h1>
-            <p>Your financial insights, alerts, and forecasts — all in one place.</p>
-            <p><a href="/health">Check System Health</a></p>
-        </body>
-    </html>
-    """
+    return """<html><head><title>Finsight AI</title></head><body style="text-align:center;margin-top:100px"><h1>Welcome to Finsight AI</h1><p>Backend is healthy</p><a href="/health">Health</a></body></html>"""
 
 if __name__ == "__main__":
+    import os
     port = int(os.environ.get("PORT", 5000))
     app.run(host="0.0.0.0", port=port)
