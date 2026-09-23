@@ -1,51 +1,37 @@
-import { useState, useEffect, useCallback } from "react";
-import { Bar } from "react-chartjs-2";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { Bar, Doughnut, Line } from "react-chartjs-2";
+import { Chart as ChartJS, CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement, PointElement, LineElement } from 'chart.js';
 import Papa from "papaparse";
-import { FaArrowUp, FaArrowDown, FaBalanceScale, FaPercentage, FaPlus } from "react-icons/fa";
+import { FaArrowUp, FaArrowDown, FaBalanceScale, FaPercentage, FaPlus, FaDownload, FaShieldAlt } from "react-icons/fa";
+import jsPDF from 'jspdf';
+import html2canvas from 'html2canvas';
+import API_BASE_URL from "./apiConfig";
+import Alerts from "./Alerts";
 
-// ✅ Currency symbols + formatter
+ChartJS.register(CategoryScale, LinearScale, BarElement, Title, Tooltip, Legend, ArcElement, PointElement, LineElement);
+
 const currencySymbols = {
-  USD: "$",
-  EUR: "€",
-  GBP: "£",
-  CAD: "C$",
-  JPY: "¥",
-  NGN: "₦",
-  ZAR: "R",
-  KES: "KSh",
-  GHS: "₵",
-  EGP: "£E",
-  XOF: "CFA",
-  XAF: "CFA"
+  USD: "$", EUR: "€", GBP: "£", CAD: "C$", JPY: "¥", NGN: "₦", ZAR: "R",
+  KES: "KSh", GHS: "₵", EGP: "£E", XOF: "CFA", XAF: "CFA"
 };
 function formatAmount(amount, currency = "NGN") {
   const symbol = currencySymbols[currency] || "";
-  return `${symbol}${Number(amount).toLocaleString()}`;
+  return `${symbol}${Number(amount || 0).toLocaleString()}`;
 }
-
-// ✅ Universal base URL (local vs Render)
-const baseUrl =
-  process.env.REACT_APP_API_URL || 
-  (window.location.hostname === "localhost"
-    ? "http://127.0.0.1:5000"
-    : "https://ai-business-insights-dashboard.onrender.com");
-
-// ✅ Universal API fetch helper
+const normalizeCategory = (cat) => {
+  if (!cat) return "Uncategorized";
+  const trimmed = String(cat).trim();
+  return trimmed.charAt(0).toUpperCase() + trimmed.slice(1).toLowerCase();
+};
 const apiFetch = async (endpoint, options = {}) => {
   const token = localStorage.getItem("token");
-  const headers = {
-    "Content-Type": "application/json",
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-    ...options.headers,
-  };
-  const res = await fetch(`${baseUrl}/api${endpoint}`, { ...options, headers });
-  if (!res.ok) {
-    throw new Error(`API error: ${res.status}`);
-  }
+  const headers = { "Content-Type": "application/json",...(token? { Authorization: `Bearer ${token}` } : {}),...options.headers };
+  const res = await fetch(`${API_BASE_URL}${endpoint}`, {...options, headers });
+  if (!res.ok) throw new Error(`API error: ${res.status}`);
   return res.json();
 };
-
 function normalizeDate(dateStr) {
+  if (!dateStr) return "";
   if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) return dateStr;
   if (/^\d{2}\/\d{2}\/\d{4}$/.test(dateStr)) {
     const [day, month, year] = dateStr.split("/");
@@ -53,117 +39,91 @@ function normalizeDate(dateStr) {
   }
   return dateStr;
 }
+const formatMonthLabel = (key) => {
+  const [year, month] = key.split('-');
+  const date = new Date(year, month - 1);
+  return date.toLocaleDateString('en-US', { month: 'short', year: 'numeric' });
+};
+const getMonthRange = (monthKeys) => {
+  if (monthKeys.length === 0) return [];
+  const sorted = [...monthKeys].sort();
+  const start = new Date(sorted[0] + "-01");
+  const end = new Date(sorted[sorted.length - 1] + "-01");
+  const months = [];
+  let current = new Date(start);
+  while (current <= end) {
+    months.push(`${current.getFullYear()}-${String(current.getMonth() + 1).padStart(2, '0')}`);
+    current.setMonth(current.getMonth() + 1);
+  }
+  return months;
+};
 
-function Dashboard() {
+function Dashboard({ isDarkMode, setIsDarkMode }) {
   const [transactions, setTransactions] = useState([]);
+  const [categories, setCategories] = useState([]);
   const [showForm, setShowForm] = useState(false);
-  const [newTransactions, setNewTransactions] = useState([
-    { date: "", type: "Expense", category: "", description: "", amount: "" }
-  ]);
-  const [darkMode, setDarkMode] = useState(false);
-  const [alerts, setAlerts] = useState([]);
-  const [currency, setCurrency] = useState("USD");
+  const [newTransactions, setNewTransactions] = useState([{ date: "", type: "Expense", category: "", description: "", amount: "" }]);
+  const [currency, setCurrency] = useState("NGN");
+  const [searchTerm, setSearchTerm] = useState('');
+  const [filterType, setFilterType] = useState('all');
+  const [dateRange, setDateRange] = useState({ start: '', end: '' });
+  const [currentPage, setCurrentPage] = useState(1);
+  const formRef = useRef(null);
+  const itemsPerPage = 10;
 
-  // Protect dashboard
+  const glassCard = isDarkMode
+   ? "bg-gray-800/70 backdrop-blur-xl border border-white/10 text-white"
+    : "bg-white/80 backdrop-blur-xl border border-gray-200 text-gray-900 shadow-sm";
+  const glassInput = isDarkMode
+   ? "border border-white/20 rounded-xl px-4 py-3 bg-gray-700/80 text-white text-base font-medium focus:ring-2 focus:ring-teal-500 outline-none"
+    : "border border-gray-300 rounded-xl px-4 py-3 bg-white text-gray-900 text-base font-medium focus:ring-2 focus:ring-teal-500 outline-none";
+  const kpiBase = `${glassCard} p-6 rounded-2xl shadow-lg border-t-4 hover:scale-[1.02] transition cursor-pointer`;
+
   useEffect(() => {
     const token = localStorage.getItem("token");
-    if (!token) {
-      setTransactions([]);
-      setAlerts([]);
-      window.location.href = "/login";
-    }
+    if (!token) { setTransactions([]); window.location.href = "/login"; }
   }, []);
 
-  // Load entries
   const loadEntries = useCallback(() => {
-    apiFetch("/entries")
-      .then(data => {
-        if (Array.isArray(data)) {
-          setTransactions(data);
-        } else {
-          setTransactions([]);
-        }
-      })
-      .catch(err => console.error("Error fetching entries:", err));
+    apiFetch("/entries").then(data => setTransactions(Array.isArray(data)? data : [])).catch(err => console.error("Error fetching entries:", err));
   }, []);
   useEffect(() => { loadEntries(); }, [loadEntries]);
 
-  // Load alerts
-  const loadAlerts = useCallback(() => {
-    apiFetch("/alerts")
-      .then(data => {
-        if (data && Array.isArray(data.alerts)) {
-          setAlerts(data.alerts);
-        } else {
-          setAlerts([]);
-        }
-      })
-      .catch(err => console.error("Error fetching alerts:", err));
+  useEffect(() => {
+    apiFetch("/categories").then(data => setCategories(Array.isArray(data)? data : [])).catch(() => { });
   }, []);
-  useEffect(() => { loadAlerts(); }, [loadAlerts]);
 
-  // Load settings for currency
   useEffect(() => {
     const token = localStorage.getItem("token");
     if (!token) return;
-    fetch(`${baseUrl}/api/settings`, {
-      headers: { Authorization: "Bearer " + token },
-    })
-      .then(res => res.json())
-      .then(data => setCurrency(data.currency || "USD"))
-      .catch(err => console.error("Error fetching settings:", err));
+    fetch(`${API_BASE_URL}/settings`, { headers: { Authorization: "Bearer " + token } })
+     .then(res => res.json()).then(data => setCurrency(data.currency || "NGN")).catch(err => console.error("Error fetching settings:", err));
   }, []);
 
-  // Logout clears state
-  const handleLogout = () => {
-    apiFetch("/clear_entries", { method: "DELETE" });
-    localStorage.clear();
-    setTransactions([]);
-    setAlerts([]);
-    window.location.href = "/login";
-  };
-
-  // Handlers
-  const handleAddRow = () =>
-    setNewTransactions([...newTransactions, { date: "", type: "Expense", category: "", description: "", amount: "" }]);
-
-  const handleChange = (i, f, v) => {
-    const u = [...newTransactions];
-    u[i][f] = v;
-    setNewTransactions(u);
+  const handleAddRow = () => setNewTransactions([...newTransactions, { date: "", type: "Expense", category: "", description: "", amount: "" }]);
+  const handleChange = (i, f, v) => { const u = [...newTransactions]; u[i][f] = v; setNewTransactions(u); };
+  const handleOpenForm = () => {
+    setShowForm(true);
+    setTimeout(() => {
+      formRef.current?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, 100);
   };
 
   const handleSaveAll = (e) => {
     e.preventDefault();
-    const formatted = newTransactions.map(t => ({
-      ...t,
-      date: normalizeDate(t.date),
-      type: t.type.toLowerCase(),
-      amount: parseFloat(t.amount) || 0
-    }));
-    apiFetch("/add", { method: "POST", body: JSON.stringify(formatted) })
-      .then(() => {
-        loadEntries();
-        loadAlerts();
-        setNewTransactions([{ date: "", type: "Expense", category: "", description: "", amount: "" }]);
-        setShowForm(false);
-      });
+    const formatted = newTransactions.map(t => ({...t, date: normalizeDate(t.date), type: t.type.toLowerCase(), category: normalizeCategory(t.category), amount: parseFloat(t.amount) || 0 }));
+    apiFetch("/add", { method: "POST", body: JSON.stringify(formatted) }).then(() => { loadEntries(); setNewTransactions([{ date: "", type: "Expense", category: "", description: "", amount: "" }]); setShowForm(false); });
   };
 
   const handleCSVUpload = (e) => {
     const file = e.target.files[0]; if (!file) return;
     Papa.parse(file, {
-      header: true, skipEmptyLines: true,
-      complete: (results) => {
+      header: true, skipEmptyLines: true, complete: (results) => {
         const parsed = results.data.filter(r => r.Date && r.Amount).map(r => ({
-          date: normalizeDate(r.Date.trim()),
-          type: r.Type.trim().toLowerCase(),
-          category: r.Category.trim(),
-          description: r.Description.trim(),
-          amount: parseFloat(r.Amount.replace(/[^0-9.-]/g, "")) || 0
+          date: normalizeDate(r.Date.trim()), type: r.Type.trim().toLowerCase(), category: normalizeCategory(r.Category.trim()),
+          description: r.Description.trim(), amount: parseFloat(r.Amount.replace(/[^0-9.-]/g, "")) || 0
         }));
-        apiFetch("/add", { method: "POST", body: JSON.stringify(parsed) })
-          .then(() => { loadEntries(); loadAlerts(); });
+        apiFetch("/add", { method: "POST", body: JSON.stringify(parsed) }).then(() => { loadEntries(); });
       }
     });
   };
@@ -171,265 +131,260 @@ function Dashboard() {
   const editTransaction = (id) => {
     const entry = transactions.find(t => t.id === id); if (!entry) return;
     const newDescription = prompt("Edit description:", entry.description); if (newDescription === null) return;
-    apiFetch("/edit_entry", { method: "PUT", body: JSON.stringify({ ...entry, description: newDescription }) })
-      .then(() => { loadEntries(); loadAlerts(); });
+    apiFetch("/edit_entry", { method: "PUT", body: JSON.stringify({...entry, description: newDescription }) }).then(() => { loadEntries(); });
   };
-
   const deleteTransaction = (id) => {
-    apiFetch("/delete_entry", { method: "DELETE", body: JSON.stringify({ id }) })
-      .then(() => { loadEntries(); loadAlerts(); });
+    if (!window.confirm("Delete this transaction?")) return;
+    apiFetch("/delete_entry", { method: "DELETE", body: JSON.stringify({ id }) }).then(() => { loadEntries(); });
+  };
+  const exportPDF = async () => {
+    const input = document.getElementById('dashboard-to-pdf');
+    const canvas = await html2canvas(input, { scale: 2, backgroundColor: isDarkMode? '#111827' : '#ffffff' });
+    const imgData = canvas.toDataURL('image/png');
+    const pdf = new jsPDF('p', 'mm', 'a4');
+    const pdfWidth = pdf.internal.pageSize.getWidth();
+    const pdfHeight = (canvas.height * pdfWidth) / canvas.width;
+    pdf.addImage(imgData, 'PNG', 0, 0, pdfWidth, pdfHeight);
+    pdf.save(`Financial-Report-${new Date().toLocaleDateString()}.pdf`);
+  };
+  const exportCSV = () => {
+    const csv = Papa.unparse(filteredTransactions);
+    const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+    const link = document.createElement('a');
+    link.href = URL.createObjectURL(blob);
+    link.setAttribute('download', `transactions-${new Date().toLocaleDateString()}.csv`);
+    document.body.appendChild(link); link.click(); document.body.removeChild(link);
   };
 
-  // Metrics
-  const totalRevenue = transactions.filter(t => t.type.toLowerCase() === "income").reduce((sum, t) => sum + Number(t.amount), 0);
-  const totalExpenses = transactions.filter(t => t.type.toLowerCase() === "expense").reduce((sum, t) => sum + Number(t.amount), 0);
-  const netProfit = totalRevenue - totalExpenses;
-  const profitMargin = totalRevenue > 0 ? (netProfit / totalRevenue) * 100 : 0;
+  const { totalRevenue, totalExpenses, netProfit, profitMargin } = useMemo(() => {
+    const rev = transactions.filter(t => t.type?.toLowerCase() === "income").reduce((sum, t) => sum + Number(t.amount || 0), 0);
+    const exp = transactions.filter(t => t.type?.toLowerCase() === "expense").reduce((sum, t) => sum + Number(t.amount || 0), 0);
+    const profit = rev - exp;
+    const margin = rev > 0? (profit / rev) * 100 : 0;
+    return { totalRevenue: rev, totalExpenses: exp, netProfit: profit, profitMargin: margin };
+  }, [transactions]);
 
-  // Chart data
-  const monthlyData = {};
-  transactions.forEach(t => {
-    const key = t.date.slice(0,7);
-    if (!monthlyData[key]) monthlyData[key] = { income: 0, expense: 0 };
-    if (t.type.toLowerCase() === "income") monthlyData[key].income += Number(t.amount);
-    else monthlyData[key].expense += Number(t.amount);
-  });
-  const chartData = {
-    labels: Object.keys(monthlyData),
+  const monthlyData = useMemo(() => {
+    const data = {};
+    transactions.forEach(t => {
+      if (!t.date) return;
+      const key = t.date.slice(0, 7);
+      if (!data[key]) data[key] = { income: 0, expense: 0 };
+      const amt = Number(t.amount || 0);
+      if (t.type?.toLowerCase() === "income") data[key].income += amt;
+      else if (t.type?.toLowerCase() === "expense") data[key].expense += amt;
+    });
+    return data;
+  }, [transactions]);
+
+  const categoryData = useMemo(() => {
+    const data = {};
+    transactions.filter(t => t.type?.toLowerCase() === "expense").forEach(t => {
+      const cat = normalizeCategory(t.category);
+      data[cat] = (data[cat] || 0) + Number(t.amount || 0);
+    });
+    return data;
+  }, [transactions]);
+
+  const allMonthKeys = useMemo(() => getMonthRange(Object.keys(monthlyData)), [monthlyData]);
+
+  const filterByType = (type) => {
+    setFilterType(type); setCurrentPage(1);
+    document.getElementById('transactions-table')?.scrollIntoView({ behavior: 'smooth' });
+  };
+
+  const chartData = useMemo(() => ({
+    labels: allMonthKeys.map(formatMonthLabel),
     datasets: [
-      { label: "Revenue", data: Object.values(monthlyData).map(m => m.income), backgroundColor: "rgba(34,197,94,0.7)" },
-      { label: "Expenses", data: Object.values(monthlyData).map(m => m.expense), backgroundColor: "rgba(239,68,68,0.7)" },
+      { label: "Revenue", data: allMonthKeys.map(k => monthlyData[k]?.income || 0), backgroundColor: "#10B981", borderColor: "#059669", borderWidth: 2, borderRadius: 8 },
+      { label: "Expenses", data: allMonthKeys.map(k => monthlyData[k]?.expense || 0), backgroundColor: "#F43F5E", borderColor: "#E11D48", borderWidth: 2, borderRadius: 8 },
     ],
-  };
-  const options = { responsive: true, plugins: { legend: { position: "top" }, title: { display: true, text: "Revenue vs Expenses" } } };
+  }), [allMonthKeys, monthlyData]);
 
-    // ✅ Expense change calculation
-  const now = new Date();
-  const thisMonthKey = now.toISOString().slice(0,7);
-  now.setMonth(now.getMonth() - 1);
-  const lastMonthKey = now.toISOString().slice(0,7);
-  const lastMonthExpenses = monthlyData[lastMonthKey]?.expense || 0;
-  const thisMonthExpenses = monthlyData[thisMonthKey]?.expense || 0;
-  const expenseChange = lastMonthExpenses > 0
-    ? (((thisMonthExpenses - lastMonthExpenses) / lastMonthExpenses) * 100).toFixed(1)
-    : 0;
+  const categoryChartData = useMemo(() => ({
+    labels: Object.keys(categoryData),
+    datasets: [{ label: "Expenses by Category", data: Object.values(categoryData), backgroundColor: ["#F43F5E", "#3B82F6", "#10B981", "#8B5CF6", "#F59E0B", "#EC4899"], borderColor: isDarkMode? "#1F2937" : "#fff", borderWidth: 3, hoverOffset: 12, cutout: '60%' }],
+  }), [categoryData, isDarkMode]);
+
+  const profitTrendData = useMemo(() => ({
+    labels: allMonthKeys.map(formatMonthLabel),
+    datasets: [{
+      label: "Net Profit", data: allMonthKeys.map(k => (monthlyData[k]?.income || 0) - (monthlyData[k]?.expense || 0)),
+      borderColor: isDarkMode? "#60A5FA" : "#2563EB", backgroundColor: isDarkMode? "rgba(96,165,250,0.2)" : "rgba(37,99,235,0.15)",
+      borderWidth: 4, tension: 0.4, fill: true, pointRadius: 6, pointBorderWidth: 3,
+      segment: { borderColor: ctx => ctx.p0.parsed.y < 0 || ctx.p1.parsed.y < 0? '#F43F5E' : (isDarkMode? "#60A5FA" : "#2563EB") }
+    }],
+  }), [allMonthKeys, monthlyData, isDarkMode]);
+
+  const textColor = isDarkMode? '#F9FAFB' : '#111827';
+  const gridColor = isDarkMode? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)';
+  const options = {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { position: "top", labels: { color: textColor, font: { size: 14, weight: 'bold' }, padding: 20 } },
+      title: { display: true, text: "Revenue vs Expenses", color: textColor, font: { size: 20, weight: 'bold' }, padding: 20 },
+      tooltip: { backgroundColor: isDarkMode? '#1F2937' : '#FFFFFF', titleColor: textColor, bodyColor: textColor, callbacks: { label: (c) => `${c.dataset.label}: ${formatAmount(c.parsed.y, currency)}` } }
+    },
+    scales: {
+      y: { beginAtZero: true, grid: { color: gridColor }, ticks: { color: textColor, font: { size: 13 }, callback: (v) => formatAmount(v, currency) } },
+      x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 13 }, maxRotation: 45, minRotation: 45 } }
+    }
+  };
+  const categoryOptions = {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { position: "right", labels: { color: textColor, font: { size: 14 } } },
+      title: { display: true, text: "Expenses by Category", color: textColor, font: { size: 20, weight: 'bold' } },
+      tooltip: { callbacks: { label: (c) => `${c.label}: ${formatAmount(c.parsed, currency)}` } }
+    }
+  };
+  const profitOptions = {
+    responsive: true, maintainAspectRatio: false,
+    plugins: {
+      legend: { position: "top", labels: { color: textColor } },
+      title: { display: true, text: "Net Profit Trend", color: textColor, font: { size: 20, weight: 'bold' } },
+      tooltip: { callbacks: { label: (c) => `Net Profit: ${formatAmount(c.parsed.y, currency)}` } }
+    },
+    scales: {
+      y: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 13 }, callback: (v) => formatAmount(v, currency) } },
+      x: { grid: { color: gridColor }, ticks: { color: textColor, font: { size: 13 }, maxRotation: 45, minRotation: 45 } }
+    }
+  };
+
+  const filteredTransactions = useMemo(() => {
+    return transactions.filter(tx => {
+      const matchesSearch = tx.description.toLowerCase().includes(searchTerm.toLowerCase()) || tx.category.toLowerCase().includes(searchTerm.toLowerCase());
+      const matchesType = filterType === 'all' || tx.type?.toLowerCase() === filterType;
+      const txDate = new Date(tx.date);
+      const matchesDate = (!dateRange.start || txDate >= new Date(dateRange.start)) && (!dateRange.end || txDate <= new Date(dateRange.end));
+      return matchesSearch && matchesType && matchesDate;
+    });
+  }, [transactions, searchTerm, filterType, dateRange]);
+
+  const totalPages = Math.ceil(filteredTransactions.length / itemsPerPage);
+  const paginatedTransactions = filteredTransactions.slice((currentPage - 1) * itemsPerPage, currentPage * itemsPerPage);
+  const highlightText = (text) => {
+    if (!searchTerm) return text;
+    const parts = String(text).split(new RegExp(`(${searchTerm})`, 'gi'));
+    return parts.map((part, i) => part.toLowerCase() === searchTerm.toLowerCase()? <span key={i} className="bg-yellow-300 text-black px-1 rounded">{part}</span> : part);
+  };
+
+  // FIXED: 3M avg runway - NOT 30 days - distinct from Cashflow Insights
+  const calcRunway = useMemo(() => {
+    const sortedKeys = Object.keys(monthlyData).sort().slice(-3); // last 3 months only
+    if (sortedKeys.length === 0) return 'N/A';
+    const avgBurn = sortedKeys.reduce((s, k) => s + (monthlyData[k]?.expense || 0), 0) / sortedKeys.length;
+    const cashLeft = totalRevenue - totalExpenses;
+
+    if (cashLeft <= 0) return '0 M - Critical';
+    if (avgBurn === 0) return '∞';
+    return `${(cashLeft / avgBurn).toFixed(1)} M`;
+  }, [monthlyData, totalRevenue, totalExpenses]);
+
+  const runwaySubLabel = useMemo(() => {
+    const cashLeft = totalRevenue - totalExpenses;
+    if (cashLeft <= 0) return 'Out of cash - Cut costs';
+    return '3M avg burn';
+  }, [totalRevenue, totalExpenses]);
 
   return (
-    <div className={darkMode ? "bg-gray-900 text-white min-h-screen p-6" : "bg-gray-50 text-black min-h-screen p-6"}>
-      {/* Header */}
-      <div className="flex items-center justify-between mb-8">
-        <h1 className="text-4xl font-extrabold">Dashboard</h1>
-        <div className="flex items-center space-x-4">
-          <div className="flex flex-col">
-            <a href={`${baseUrl}/sample_csv`} className="px-4 py-2 bg-green-600 text-white rounded font-bold" download="sample.csv">
-              Download Sample CSV
-            </a>
-            <p className="text-sm text-gray-500">Use this template to avoid upload errors.</p>
-          </div>
-          <label className="px-4 py-2 bg-blue-600 text-white rounded cursor-pointer font-bold">
-            Upload CSV
-            <input type="file" accept=".csv" onChange={handleCSVUpload} className="hidden" />
-          </label>
-          <button onClick={() => setShowForm(true)} className="flex items-center px-4 py-2 bg-green-600 text-white rounded font-bold">
-            <FaPlus className="mr-2" /> Add Transactions
-          </button>
-          <button onClick={() => setDarkMode(!darkMode)} className="px-4 py-2 bg-gray-800 text-white rounded font-bold">
-            Toggle {darkMode ? "Light" : "Dark"} Mode
-          </button>
-          <button onClick={handleLogout} className="px-4 py-2 bg-red-600 text-white rounded font-bold">Logout</button>
+    <div id="dashboard-to-pdf" className={isDarkMode? "bg-gradient-to-br from-gray-900 to-gray-800 text-white min-h-screen p-6" : "bg-gradient-to-br from-gray-50 to-teal-50 text-gray-900 min-h-screen p-6"}>
+      <div className="flex items-center justify-between mb-6 flex-wrap gap-3">
+        <div>
+          <h1 className="text-4xl font-black tracking-tight flex items-center gap-3">Dashboard <span className="flex items-center text-sm font-bold bg-green-100 text-green-700 px-3 py-1 rounded-full"><FaShieldAlt className="mr-1" /> Secure • Encrypted • Token-protected</span></h1>
+          <p className="text-base opacity-70 mt-1 font-medium">Daily Operations • Real-time Cashflow • Investor Grade</p>
+        </div>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={exportPDF} className="flex items-center px-4 py-2.5 bg-indigo-600 hover:bg-indigo-700 text-white rounded-xl text-base font-bold"><FaDownload className="mr-2" /> PDF</button>
+          <button onClick={exportCSV} className="flex items-center px-4 py-2.5 bg-green-600 hover:bg-green-700 text-white rounded-xl text-base font-bold"><FaDownload className="mr-2" /> CSV</button>
+          <a href={`${API_BASE_URL}/sample_csv`} className="px-4 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-base font-bold">Sample CSV</a>
+          <label className="px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-xl cursor-pointer text-base font-bold">Upload CSV<input type="file" accept=".csv" onChange={handleCSVUpload} className="hidden" /></label>
+          <button onClick={handleOpenForm} className="flex items-center px-5 py-2.5 bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl text-base font-bold shadow-md"><FaPlus className="mr-2" /> Add</button>
+          <button onClick={() => setIsDarkMode(!isDarkMode)} className="px-4 py-2.5 bg-gray-800 hover:bg-gray-900 text-white rounded-xl text-base font-bold">Toggle {isDarkMode? "Light" : "Dark"}</button>
         </div>
       </div>
 
-      {/* Metrics Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-4 gap-6 mb-8">
-        <div className={darkMode ? "bg-gray-800 p-6 rounded-lg shadow text-white" : "bg-green-100 p-6 rounded-lg shadow"}>
-          <div className="flex justify-between items-center">
-            <h3 className="text-xl font-bold">Total Revenue</h3>
-            <FaArrowUp className={darkMode ? "text-green-300" : "text-green-600"} />
-          </div>
-          <p className={darkMode ? "text-3xl font-extrabold text-green-300" : "text-3xl font-extrabold text-green-600"}>
-            {formatAmount(totalRevenue, currency)}
-          </p>
+      <div className="grid grid-cols-1 md:grid-cols-5 gap-5 mb-8">
+        <div onClick={() => filterByType('income')} className={`${kpiBase} border-green-500`}>
+          <div className="flex justify-between items-center"><span className="text-base font-bold opacity-90 tracking-wide">Total Revenue</span><FaArrowUp className="text-green-500 text-lg" /></div>
+          <p className="text-3xl font-black mt-3 tracking-tight">{formatAmount(totalRevenue, currency)}</p>
         </div>
-        <div className={darkMode ? "bg-gray-800 p-6 rounded-lg shadow text-white" : "bg-red-100 p-6 rounded-lg shadow"}>
-          <div className="flex justify-between items-center">
-            <h3 className="text-xl font-bold">Total Expenses</h3>
-            <FaArrowDown className={darkMode ? "text-red-300" : "text-red-600"} />
-          </div>
-          <p className={darkMode ? "text-3xl font-extrabold text-red-300" : "text-3xl font-extrabold text-red-600"}>
-            {formatAmount(totalExpenses, currency)}
-          </p>
+        <div onClick={() => filterByType('expense')} className={`${kpiBase} border-red-500`}>
+          <div className="flex justify-between items-center"><span className="text-base font-bold opacity-90 tracking-wide">Total Expenses</span><FaArrowDown className="text-red-500 text-lg" /></div>
+          <p className="text-3xl font-black mt-3 tracking-tight">{formatAmount(totalExpenses, currency)}</p>
         </div>
-        <div className={darkMode ? "bg-gray-800 p-6 rounded-lg shadow text-white" : "bg-blue-100 p-6 rounded-lg shadow"}>
-          <div className="flex justify-between items-center">
-            <h3 className="text-xl font-bold">Net Profit</h3>
-            <FaBalanceScale className={darkMode ? "text-blue-300" : "text-blue-600"} />
-          </div>
-          <p className={darkMode ? "text-3xl font-extrabold text-blue-300" : "text-3xl font-extrabold text-blue-600"}>
-            {formatAmount(netProfit, currency)}
-          </p>
+        <div onClick={() => filterByType('all')} className={`${kpiBase} border-blue-500`}>
+          <div className="flex justify-between items-center"><span className="text-base font-bold opacity-90 tracking-wide">Net Profit</span><FaBalanceScale className="text-blue-500 text-lg" /></div>
+          <p className="text-3xl font-black mt-3 tracking-tight">{formatAmount(netProfit, currency)}</p>
         </div>
-        <div className={darkMode ? "bg-gray-800 p-6 rounded-lg shadow text-white" : "bg-purple-100 p-6 rounded-lg shadow"}>
-          <div className="flex justify-between items-center">
-            <h3 className="text-xl font-bold">Profit Margin</h3>
-            <FaPercentage className={darkMode ? "text-purple-300" : "text-purple-600"} />
-          </div>
-          <p className={darkMode ? "text-3xl font-extrabold text-purple-300" : "text-3xl font-extrabold text-purple-600"}>
-            {profitMargin.toFixed(2)}%
-          </p>
+        <div className={`${kpiBase} border-purple-500`}>
+          <div className="flex justify-between items-center"><span className="text-base font-bold opacity-90 tracking-wide">Profit Margin</span><FaPercentage className="text-purple-500 text-lg" /></div>
+          <p className="text-3xl font-black mt-3 tracking-tight">{profitMargin.toFixed(2)}%</p>
+        </div>
+        <div className={`${kpiBase} border-orange-500`}>
+          <div className="flex justify-between items-center"><span className="text-base font-bold opacity-90 tracking-wide">Runway</span><FaBalanceScale className="text-orange-500 text-lg" /></div>
+          <p className="text-3xl font-black mt-3 tracking-tight">{calcRunway}</p>
+          <p className="text-sm mt-1 font-bold opacity-80">{runwaySubLabel}</p>
         </div>
       </div>
 
-      {/* Cashflow Insights */}
-      <div className={darkMode ? "bg-gray-800 p-6 rounded-lg shadow-md mb-6 text-white" : `p-6 rounded-lg shadow-md mb-6 ${netProfit < 2000 ? "bg-red-100" : "bg-teal-50"}`}>
-        <h2 className="text-lg font-bold mb-2">📊 Cashflow Insights</h2>
-        <p>📊 Expenses increased by {expenseChange}% compared to last month.</p>
-        <p>🔮 Forecast: Cashflow looks stable for the next 2 months.</p>
-        <p>💡 Suggested Action: Consider renegotiating supplier contracts or cutting non‑essential costs.</p>
-        <p>📈 Net Profit: <span className="font-bold">{formatAmount(netProfit, currency)}</span> (Margin: {profitMargin.toFixed(2)}%)</p>
+      <div className={`${glassCard} p-6 rounded-2xl shadow-lg mb-8 border-l-4 border-cyan-500`}>
+        <h2 className="text-xl font-extrabold mb-4">Cashflow Insights - Daily Operations</h2>
+        {(() => {
+          const sortedMonths = Object.keys(monthlyData).sort();
+          const lastM = sortedMonths[sortedMonths.length - 1];
+          const prevM = sortedMonths[sortedMonths.length - 2];
+          const lastExp = monthlyData[lastM]?.expense || 0;
+          const prevExp = monthlyData[prevM]?.expense || 0;
+          let changeText = "";
+          if (prevExp > 0) { const pct = ((lastExp - prevExp) / prevExp) * 100; changeText = `(${pct >= 0? 'Up' : 'Down'} ${Math.abs(pct).toFixed(1)}% vs last month)`; }
+          else if (lastExp > 0) { changeText = `(First month with expenses)`; }
+          const cashflowStatus = netProfit < 0? "unstable" : "stable";
+          const suggestedAction = totalExpenses > totalRevenue? "Consider renegotiating supplier contracts or cutting non-essential costs." : "Explore growth investments to boost revenue.";
+          return (<div className="space-y-3 text-base leading-relaxed font-medium">
+            <p>Expenses this month: <span className="font-bold">{formatAmount(lastExp, currency)}</span> {changeText}</p>
+            <p>Total Expenses All-Time: <span className="font-bold">{formatAmount(totalExpenses, currency)}</span> • Cash Left: <span className="font-bold">{formatAmount(totalRevenue - totalExpenses, currency)}</span></p>
+            <p>Forecast: Cashflow looks <span className="font-bold">{cashflowStatus}</span> based on all-time data.</p>
+            <p>Suggested Action: {suggestedAction}</p>
+            <p>Net Profit: <span className="font-bold">{formatAmount(netProfit, currency)}</span> (Margin: {profitMargin.toFixed(2)}%)</p>
+          </div>)
+        })()}
       </div>
 
-      {/* Alerts Panel */}
-      <div className={darkMode ? "bg-gray-800 p-6 rounded shadow mb-8 text-white" : "bg-white p-6 rounded shadow mb-8"}>
-        <h2 className="text-2xl font-bold mb-4">Alerts</h2>
-        {alerts.length > 0 ? (
-          alerts.map((a) => {
-            const level = a.level.toLowerCase();
-            let borderColor = darkMode ? "border-blue-300" : "border-blue-600";
-            let titleColor = darkMode ? "text-blue-300" : "text-blue-600";
-            let title = "Informational";
+      <Alerts dashboardData={{ totalRevenue, totalExpenses, netProfit, profitMargin }} isDarkMode={isDarkMode} />
 
-            if (level === "high") {
-              borderColor = darkMode ? "border-red-300" : "border-red-600";
-              titleColor = darkMode ? "text-red-300" : "text-red-600";
-              title = "High Priority";
-            } else if (level === "medium") {
-              borderColor = darkMode ? "border-yellow-300" : "border-yellow-600";
-              titleColor = darkMode ? "text-yellow-300" : "text-yellow-600";
-              title = "Medium Priority";
-            }
+      <div className={`${glassCard} p-6 rounded-2xl shadow-lg mb-8`}><div style={{ height: '400px' }}><Bar data={chartData} options={options} /></div></div>
+      <div className={`${glassCard} p-6 rounded-2xl shadow-lg mb-8`}><div style={{ height: '400px' }}><Doughnut data={categoryChartData} options={categoryOptions} /></div></div>
+      <div className={`${glassCard} p-6 rounded-2xl shadow-lg mb-8`}><div style={{ height: '400px' }}><Line data={profitTrendData} options={profitOptions} /></div></div>
 
-            return (
-              <div key={a.id} className={`p-4 rounded shadow mb-4 border-l-4 ${borderColor}`}>
-                <h3 className={`text-lg font-bold ${titleColor}`}>{title}</h3>
-                <p>{a.message}</p>
-              </div>
-            );
-          })
-        ) : (
-          <p>No alerts available.</p>
-        )}
-      </div>
+      {showForm && (<div ref={formRef} className={`${glassCard} p-6 rounded-2xl mb-8 shadow-lg border-2 border-teal-500`}><h2 className="text-2xl font-bold mb-5">New Transactions - Daily Operations</h2><form onSubmit={handleSaveAll} className="space-y-4">{newTransactions.map((t, index) => (<div key={index} className="grid grid-cols-1 md:grid-cols-5 gap-3"><input type="date" value={t.date} onChange={(e) => handleChange(index, "date", e.target.value)} className={glassInput} required /><select value={t.type} onChange={(e) => handleChange(index, "type", e.target.value)} className={glassInput}><option>Expense</option><option>Income</option></select><select value={t.category} onChange={(e) => handleChange(index, "category", e.target.value)} className={glassInput} required><option value="">Select Category</option>{categories.filter(c => c.type === (t.type?.toLowerCase() || "expense")).map(cat => (<option key={cat.id} value={cat.name}>{cat.name}</option>))}</select><input type="text" placeholder="Description" value={t.description} onChange={(e) => handleChange(index, "description", e.target.value)} className={glassInput} required /><input type="number" placeholder="Amount" value={t.amount} onChange={(e) => handleChange(index, "amount", e.target.value)} className={glassInput} required /></div>))}<div className="flex gap-3 mt-5"><button type="button" onClick={handleAddRow} className="px-5 py-2.5 bg-blue-600 text-white rounded-xl text-base font-bold">Add Row</button><button type="button" onClick={() => setShowForm(false)} className="px-5 py-2.5 bg-gray-400 text-white rounded-xl text-base font-bold">Cancel</button><button type="submit" className="px-6 py-2.5 bg-emerald-600 text-white rounded-xl text-base font-bold">Save</button></div></form></div>)}
 
-      {/* Chart */}
-      <div className={darkMode ? "bg-gray-800 p-6 rounded shadow mb-8 text-white" : "bg-white p-6 rounded shadow mb-8"}>
-        <Bar data={chartData} options={options} />
-      </div>
-
-            {/* Multi-row Form */}
-      {showForm && (
-        <div className={darkMode ? "bg-gray-800 p-6 rounded mb-8 text-white" : "bg-gray-100 p-6 rounded mb-8"}>
-          <h2 className="text-2xl font-bold mb-4">New Transactions</h2>
-          <form onSubmit={handleSaveAll} className="space-y-6">
-            {newTransactions.map((t, index) => (
-              <div key={index} className="grid grid-cols-5 gap-4">
-                <input 
-                  type="date" 
-                  value={t.date} 
-                  onChange={(e) => handleChange(index, "date", e.target.value)} 
-                  className={darkMode ? "p-2 border-2 rounded bg-gray-700 text-white" : "p-2 border-2 rounded text-black"} 
-                  required 
-                />
-                <select 
-                  value={t.type} 
-                  onChange={(e) => handleChange(index, "type", e.target.value)} 
-                  className={darkMode ? "p-2 border-2 rounded bg-gray-700 text-white" : "p-2 border-2 rounded text-black"}
-                >
-                  <option>Expense</option>
-                  <option>Income</option>
-                </select>
-                <input 
-                  type="text" 
-                  placeholder="Category" 
-                  value={t.category} 
-                  onChange={(e) => handleChange(index, "category", e.target.value)} 
-                  className={darkMode ? "p-2 border-2 rounded bg-gray-700 text-white" : "p-2 border-2 rounded text-black"} 
-                  required 
-                />
-                <input 
-                  type="text" 
-                  placeholder="Description" 
-                  value={t.description} 
-                  onChange={(e) => handleChange(index, "description", e.target.value)} 
-                  className={darkMode ? "p-2 border-2 rounded bg-gray-700 text-white" : "p-2 border-2 rounded text-black"} 
-                  required 
-                />
-                <input 
-                  type="number" 
-                  placeholder="Amount" 
-                  value={t.amount} 
-                  onChange={(e) => handleChange(index, "amount", e.target.value)} 
-                  className={darkMode ? "p-2 border-2 rounded bg-gray-700 text-white" : "p-2 border-2 rounded text-black"} 
-                  required 
-                />
-              </div>
-            ))}
-            <div className="flex space-x-4 mt-4">
-              <button type="button" onClick={handleAddRow} className="px-4 py-2 bg-blue-600 text-white rounded font-bold">Add Another Row</button>
-              <button type="button" onClick={() => setShowForm(false)} className="px-6 py-2 bg-gray-400 text-white font-bold rounded">Cancel</button>
-              <button type="submit" className="px-6 py-2 bg-green-600 text-white font-bold rounded">Save Transactions</button>
+      <div id="transactions-table" className={`${glassCard} p-6 rounded-2xl shadow-lg`}>
+        <h2 className="text-2xl font-bold mb-5">Recent Transactions - Daily Operations</h2>
+        <div className="flex gap-3 mb-5 flex-wrap">
+          <input type="text" placeholder="Search..." value={searchTerm} onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }} className={glassInput} />
+          <select value={filterType} onChange={(e) => { setFilterType(e.target.value); setCurrentPage(1); }} className={glassInput}><option value="all">All Types</option><option value="income">Income</option><option value="expense">Expense</option></select>
+          <input type="date" value={dateRange.start} onChange={(e) => { setDateRange({...dateRange, start: e.target.value }); setCurrentPage(1); }} className={glassInput} />
+          <input type="date" value={dateRange.end} onChange={(e) => { setDateRange({...dateRange, end: e.target.value }); setCurrentPage(1); }} className={glassInput} />
+        </div>
+        <div className="overflow-x-auto">
+          <table className="min-w-full text-left text-base">
+            <thead><tr className={isDarkMode? "border-b border-white/10 bg-white/5" : "border-b bg-black/5"}><th className="py-4 px-4 font-bold">Date</th><th className="py-4 px-4 font-bold">Type</th><th className="py-4 px-4 font-bold">Category</th><th className="py-4 px-4 font-bold">Description</th><th className="py-4 px-4 font-bold">Amount</th><th className="py-4 px-4 font-bold">Actions</th></tr></thead>
+            <tbody>{paginatedTransactions.length > 0? (paginatedTransactions.map((t, idx) => (<tr key={t.id || idx} className={isDarkMode? `border-b border-white/5 hover:bg-white/5` : `border-b hover:bg-black/5`}><td className="py-4 px-4 font-medium">{t.date}</td><td className="py-4 px-4"><span className={`px-3 py-1 rounded-full text-sm font-bold ${t.type?.toLowerCase() === "income"? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}`}>{t.type}</span></td><td className="py-4 px-4 font-medium">{highlightText(normalizeCategory(t.category))}</td><td className="py-4 px-4">{highlightText(t.description)}</td><td className="py-4 px-4 font-bold text-base">{formatAmount(t.amount, currency)}</td><td className="py-4 px-4 space-x-2"><button onClick={() => editTransaction(t.id)} className="px-4 py-1.5 bg-yellow-500 text-white rounded-lg text-sm font-bold">Edit</button><button onClick={() => deleteTransaction(t.id)} className="px-4 py-1.5 bg-red-500 text-white rounded-lg text-sm font-bold">Delete</button></td></tr>))) : (<tr><td colSpan="6" className="py-6 text-center text-base">No transactions found.</td></tr>)}</tbody>
+          </table>
+        </div>
+        {filteredTransactions.length > itemsPerPage && (
+          <div className="flex justify-between items-center mt-6 text-base font-medium">
+            <p>Showing {(currentPage - 1) * itemsPerPage + 1} - {Math.min(currentPage * itemsPerPage, filteredTransactions.length)} of {filteredTransactions.length}</p>
+            <div className="flex gap-3 items-center">
+              <button onClick={() => setCurrentPage(p => Math.max(p - 1, 1))} disabled={currentPage === 1} className="px-4 py-2 bg-gray-600 text-white rounded-lg disabled:opacity-50">Prev</button>
+              <span>Page {currentPage} of {totalPages}</span>
+              <button onClick={() => setCurrentPage(p => Math.min(p + 1, totalPages))} disabled={currentPage === totalPages} className="px-4 py-2 bg-gray-600 text-white rounded-lg disabled:opacity-50">Next</button>
             </div>
-          </form>
-        </div>
-      )}
-
-      {/* Recent Transactions */}
-      <div className={darkMode ? "bg-gray-800 p-6 rounded shadow text-white" : "bg-white p-6 rounded shadow"}>
-        <h2 className="text-2xl font-bold mb-4">Recent Transactions</h2>
-        <table className={darkMode ? "min-w-full text-left text-base border-collapse text-white" : "min-w-full text-left text-base border-collapse text-black"}>
-          <thead>
-            <tr className={darkMode ? "border-b bg-gray-700 font-bold" : "border-b bg-gray-100 font-bold"}>
-              <th className="py-2 px-4">Date</th>
-              <th className="py-2 px-4">Type</th>
-              <th className="py-2 px-4">Category</th>
-              <th className="py-2 px-4">Description</th>
-              <th className="py-2 px-4">Amount</th>
-              <th className="py-2 px-4">Actions</th>
-            </tr>
-          </thead>
-          <tbody>
-            {transactions.map((t) => (
-              <tr key={t.id} className={darkMode ? "border-b hover:bg-gray-700" : "border-b hover:bg-gray-50"}>
-                <td className="py-2 px-4">{t.date}</td>
-                <td className={`py-2 px-4 font-semibold ${t.type.toLowerCase() === "income" ? (darkMode ? "text-green-300" : "text-green-600") : (darkMode ? "text-red-300" : "text-red-600")}`}>
-                  {t.type}
-                </td>
-                <td className="py-2 px-4">{t.category}</td>
-                <td className="py-2 px-4">{t.description}</td>
-                <td className={`py-2 px-4 font-bold ${t.type.toLowerCase() === "income" ? (darkMode ? "text-green-300" : "text-green-600") : (darkMode ? "text-red-300" : "text-red-600")}`}>
-                  {formatAmount(t.amount, currency)}
-                </td>
-                <td className="py-2 px-4 space-x-2">
-                  <button
-                    onClick={() => editTransaction(t.id)}
-                    className="px-2 py-1 bg-yellow-500 text-white rounded hover:bg-yellow-600 font-bold"
-                  >
-                    Edit
-                  </button>
-                  <button
-                    onClick={() => deleteTransaction(t.id)}
-                    className="px-2 py-1 bg-red-500 text-white rounded hover:bg-red-600 font-bold"
-                  >
-                    Delete
-                  </button>
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+          </div>
+        )}
       </div>
     </div>
   );
 }
-
 export default Dashboard;
