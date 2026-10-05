@@ -1,13 +1,11 @@
-import os, csv, io
+import os
 import pandas as pd
 from dotenv import load_dotenv
-load_dotenv()  # Render will use Environment Variables from dashboard, not file
+load_dotenv()
 
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
-from werkzeug.utils import secure_filename
 from datetime import datetime, date
-from apscheduler.schedulers.background import BackgroundScheduler
 from collections import defaultdict, Counter
 import calendar
 
@@ -24,11 +22,19 @@ CORS(app, supports_credentials=True, origins=[
     "https://finsight-frontend-rhov.onrender.com"
 ])
 
-db_url = os.getenv('DATABASE_URL', '')
-if db_url.startswith('postgres://'):
-    db_url = db_url.replace('postgres://', 'postgresql+psycopg2://', 1)
-elif db_url.startswith('postgresql://'):
-    db_url = db_url.replace('postgresql://', 'postgresql+psycopg2://', 1)
+# --- DATABASE FIX - FORCES psycopg2 (you have psycopg2-binary) ---
+db_url = os.getenv('DATABASE_URL', '').strip()
+if not db_url:
+    # Local fallback - safe, no secret
+    db_url = "sqlite:///finsight.db"
+else:
+    if db_url.startswith("postgres://"):
+        db_url = db_url.replace("postgres://", "postgresql+psycopg2://", 1)
+    elif db_url.startswith("postgresql://"):
+        # only replace if not already has +psycopg2 or +psycopg
+        if "+psycopg" not in db_url:
+            db_url = db_url.replace("postgresql://", "postgresql+psycopg2://", 1)
+
 app.config['SQLALCHEMY_DATABASE_URI'] = db_url
 app.config["SQLALCHEMY_TRACK_MODIFICATIONS"] = False
 app.config["SECRET_KEY"] = os.getenv("SECRET_KEY", "replace_with_long_random_secret_key")
@@ -38,6 +44,11 @@ migrate.init_app(app, db)
 
 app.register_blueprint(entries_bp, url_prefix="/api")
 app.register_blueprint(auth_bp, url_prefix="/api")
+
+# Create tables without dropping - prevents Render timeout
+with app.app_context():
+    db.create_all()
+    print("All tables ready - no drop")
 
 CURRENCY_SYMBOLS = {
     "USD": "$", "EUR": "€", "GBP": "£", "CAD": "C$", "JPY": "¥",
