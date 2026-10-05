@@ -1,7 +1,7 @@
 import os, csv, io
 import pandas as pd
 from dotenv import load_dotenv
-load_dotenv()
+load_dotenv()  # Render will use Environment Variables from dashboard, not file
 
 from flask import Flask, request, jsonify, Response
 from flask_cors import CORS
